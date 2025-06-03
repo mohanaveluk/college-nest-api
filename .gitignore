@@ -1,0 +1,12 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+
+# Nuxt.js build / generate output
+.nuxt
+dist
+logs
+
+# Environment files
+.env
+.env.*

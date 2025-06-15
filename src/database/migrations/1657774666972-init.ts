@@ -45,3 +45,4 @@ export class init1657774666972 implements MigrationInterface {
 
   }
 }
+export default init1657774666972;

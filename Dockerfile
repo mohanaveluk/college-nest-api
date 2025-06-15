@@ -10,6 +10,9 @@ COPY package*.json ./
 # Copy the rest of the application code to the working directory
 COPY . .
 
+# update nopm
+npm install -g npm@11.4.2
+
 # Install dependencies
 RUN npm install
 

@@ -1,5 +1,5 @@
 //docker-compose up --build
-import { MigrationInterface, QueryRunner, Table  } from 'typeorm';
+import type { MigrationInterface, QueryRunner, Table  } from 'typeorm';
 
 export class initSchema1704428169000 implements MigrationInterface {
 

@@ -1,4 +1,4 @@
-import { MigrationInterface, QueryRunner, Table } from 'typeorm';
+import type { MigrationInterface, QueryRunner } from 'typeorm';
 
 export class master1747224792846 implements MigrationInterface {
 

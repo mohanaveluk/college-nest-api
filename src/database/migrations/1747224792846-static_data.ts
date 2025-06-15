@@ -1,4 +1,3 @@
-import { timeStamp } from 'console';
 import { MigrationInterface, QueryRunner, Table } from 'typeorm';
 
 export class master1747224792846 implements MigrationInterface {

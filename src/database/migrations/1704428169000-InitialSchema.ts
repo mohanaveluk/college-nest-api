@@ -133,4 +133,3 @@ export class initSchema1704428169000 implements MigrationInterface {
 
   }
 }
-export default initSchema1704428169000;

@@ -270,4 +270,3 @@ export class master1747224792846 implements MigrationInterface {
 
   }
 }
-export default master1747224792846;

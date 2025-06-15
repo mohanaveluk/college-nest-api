@@ -68,7 +68,7 @@ export class SearchController {
     @Query('page') page: number = 1,
     @Query('limit') limit: number = 10,
   ) {
-    return this.searchService.searchCollegesByMultipleWords({
+    return this.searchService.searchInstitutions({
       keyword,
       categorySection,
       location,

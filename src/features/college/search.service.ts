@@ -1,11 +1,12 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Brackets, Repository } from 'typeorm';
 import { College } from './entities/college.entity';
 import { State } from './entities/state.entity';
 import { District } from './entities/district.entity';
 import { CategorySection } from './entities/category-section.entity';
 import { CollegeSearchResponse } from './dto/college-search-response';
+import { SearchQueryService } from './search-query.services';
 
 @Injectable()
 export class SearchService {
@@ -18,6 +19,7 @@ export class SearchService {
     private districtRepository: Repository<District>,
     @InjectRepository(CategorySection)
     private categorySectionRepository: Repository<CategorySection>,
+    private searchQueryService: SearchQueryService
   ) { }
 
   async searchColleges(options: {
@@ -164,7 +166,6 @@ export class SearchService {
           college.address LIKE :${paramName} OR
           college.city LIKE :${paramName} OR
           college.category LIKE :${paramName} OR
-          college.category LIKE :${paramName} OR
           district.name LIKE :${paramName} OR
           state.name LIKE :${paramName} OR
           country.name LIKE :${paramName} OR
@@ -182,7 +183,9 @@ export class SearchService {
         title: `%${options.categorySection}%`
       });
     }
-    
+    // Sort by location specificity (city > district > state)
+    //---query.setParameter(paramName, `%${keyword}%`);
+
     // Add pagination
     const page = options.page || 1;
     const limit = options.limit || 100;
@@ -207,6 +210,298 @@ export class SearchService {
     };
   }
 
+  async searchInstitutions2(options: {
+    keyword?: string;
+    categorySection?: string;
+    location?: string;
+    page?: number;
+    limit?: number;
+  }) {
+    const { primarySearchTerm, locationTerms, institutionSynonyms, filters } =
+      this.parseSearchQueryv4(options.keyword);
+
+    // let queryBuilder1 = this.collegeRepository.createQueryBuilder('inst')
+    //   .leftJoinAndSelect('college', 'location')
+    //   .leftJoinAndSelect('location.city', 'city')
+    //   .leftJoinAndSelect('location.district', 'district')
+    //   .leftJoinAndSelect('location.state', 'state');
+
+    // Add pagination
+    const page = options.page || 1;
+    const limit = options.limit || 100;
+    const skip = (page - 1) * limit;
+    
+
+    let queryBuilder = this.collegeRepository
+      .createQueryBuilder('college')
+      .leftJoinAndSelect('college.state', 'state')
+      .leftJoinAndSelect('college.district', 'district')
+      .leftJoinAndSelect('college.country', 'country')
+      .leftJoinAndSelect('college.collegeCourses', 'collegeCourses')
+      .leftJoinAndSelect('collegeCourses.course', 'course')
+      .leftJoinAndSelect('college.performances', 'performance')
+      .leftJoinAndSelect('college.categorySection', 'section')
+
+    // Apply filters
+    Object.entries(filters).forEach(([key, value]) => {
+      queryBuilder = queryBuilder.andWhere(`${key} = :${key}`, { [key]: value });
+    });
+
+    // Handle location-based searches
+    if (locationTerms.length > 0) {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          locationTerms.forEach(term => {
+            qb.orWhere('LOWER(city) LIKE LOWER(:term)', { term: `%${term}%` })
+              .orWhere('LOWER(address) LIKE LOWER(:term)', { term: `%${term}%` })
+              .orWhere('LOWER(district.name) LIKE LOWER(:term)', { term: `%${term}%` })
+              .orWhere('LOWER(state.name) LIKE LOWER(:term)', { term: `%${term}%` })
+              .orWhere('LOWER(country.name) LIKE LOWER(:term)', { term: `%${term}%` });
+          });
+        })
+      );
+
+      // Sort by location specificity (city > district > state)
+      queryBuilder = queryBuilder
+        .orderBy(`
+          CASE
+            WHEN LOWER(city) LIKE LOWER('%${locationTerms[0]}%') THEN 1
+            WHEN LOWER(address) LIKE LOWER('%${locationTerms[0]}%') THEN 2
+            WHEN LOWER(district.name) LIKE LOWER('%${locationTerms[0]}%') THEN 3
+            WHEN LOWER(state.name) LIKE LOWER('%${locationTerms[0]}%') THEN 4
+            ELSE 5
+          END`, 'ASC');
+    }
+
+    // Handle institution type searches
+    if (institutionSynonyms.length > 0) {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          institutionSynonyms.forEach(synonym => {
+            qb.orWhere('LOWER(inst.name) LIKE LOWER(:synonym)', { synonym: `%${synonym}%` })
+              .orWhere('LOWER(category) LIKE LOWER(:synonym)', { synonym: `%${synonym}%` });
+          });
+        })
+      );
+    }
+
+    // Handle single word searches
+    if (primarySearchTerm) {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          qb.where('LOWER(name) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(description) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(course.name) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(section.title) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(address) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` });
+        })
+      );
+    }
+
+    // Category section filter
+    if (options.categorySection && options.categorySection?.trim().toLowerCase() !== 'all') {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          qb.orWhere('LOWER(section.title) LIKE LOWER(:synonym)', { synonym: `%${options.categorySection}%` });
+        })
+      );
+    }
+
+    // Get total count before pagination
+    const total = await queryBuilder.getCount();
+    queryBuilder = queryBuilder.skip(skip).take(limit);
+    const data = await queryBuilder.getMany();
+
+    return data;
+  }
+
+  async searchInstitutions(options: {
+    keyword?: string;
+    categorySection?: string;
+    location?: string;
+    page?: number;
+    limit?: number;
+  }): Promise<CollegeSearchResponse> {
+    // const { primarySearchTerm, locationTerms, institutionSynonyms, filters } =
+    //   this.parseSearchQueryv5(options.keyword);
+    const parsedQuery = await this.searchQueryService.parseSearchQueryv2(options.keyword);
+    const { primarySearchTerm, locationTerms, institutionSynonyms, courseTerms, filters } = parsedQuery;
+
+
+    // Initialize query builder
+    let queryBuilder = this.collegeRepository
+      .createQueryBuilder('college')
+      .leftJoinAndSelect('college.state', 'state')
+      .leftJoinAndSelect('college.district', 'district')
+      .leftJoinAndSelect('college.country', 'country')
+      .leftJoinAndSelect('college.collegeCourses', 'collegeCourses')
+      .leftJoinAndSelect('collegeCourses.course', 'course')
+      .leftJoinAndSelect('college.performances', 'performance')
+      .leftJoinAndSelect('college.categorySection', 'section');
+
+    // Apply filters
+    Object.entries(filters).forEach(([key, value]) => {
+      queryBuilder = queryBuilder.andWhere(`college.${key} = :${key}`, { [key]: value });
+    });
+
+    // Handle location search - PHASE 1: Filtering
+    if (locationTerms.length > 0) {
+      //const locationTerm = locationTerms[0];
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          locationTerms.forEach(locationTerm => {
+            qb.orWhere('LOWER(college.city) LIKE LOWER(:locationTerm)', { locationTerm: `%${locationTerm}%` })
+              .orWhere('LOWER(college.address) LIKE LOWER(:locationTerm)', { locationTerm: `%${locationTerm}%` })
+              .orWhere('LOWER(district.name) LIKE LOWER(:locationTerm)', { locationTerm: `%${locationTerm}%` })
+              .orWhere('LOWER(state.name) LIKE LOWER(:locationTerm)', { locationTerm: `%${locationTerm}%` })
+              .orWhere('LOWER(country.name) LIKE LOWER(:locationTerm)', { locationTerm: `%${locationTerm}%` });
+          });
+        })
+      );
+    }
+    
+    // 3. Apply course term filters (most important - adds weight)
+    if (courseTerms.length > 0) {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          courseTerms.forEach(courseTerm => {
+            qb.orWhere('LOWER(course.name) LIKE LOWER(:courseTerm)', {
+              courseTerm: `%${courseTerm}%`
+            });
+          });
+        })
+      );
+    }
+
+    // Handle institution type searches
+    if (institutionSynonyms.length > 0) {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          institutionSynonyms.forEach(synonym => {
+            qb.orWhere('LOWER(college.name) LIKE LOWER(:synonym)', { synonym: `%${synonym}%` })
+              .orWhere('LOWER(college.category) LIKE LOWER(:synonym)', { synonym: `%${synonym}%` });
+          });
+        })
+      );
+    }
+
+    // Handle single word searches
+    if (primarySearchTerm) {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          qb.where('LOWER(college.name) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(college.description) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(course.name) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(section.title) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` })
+            .orWhere('LOWER(college.address) LIKE LOWER(:term)', { term: `%${primarySearchTerm}%` });
+        })
+      );
+    }
+
+    // Category section filter
+    if (options.categorySection && options.categorySection?.trim().toLowerCase() !== 'all') {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          qb.orWhere('LOWER(section.title) LIKE LOWER(:synonym)', { synonym: `%${options.categorySection}%` });
+        })
+      );
+    }
+
+    // Get total count before pagination
+    const total = await queryBuilder.getCount();
+
+    // PHASE 2: Create a separate query for ordering and pagination
+    const page = Number(options.page) || 1;
+    const limit = Number(options.limit) || 100;
+    const skip = (page - 1) * limit;
+
+    // Get just the IDs with proper ordering first
+    let orderedIdsQuery = this.collegeRepository
+      .createQueryBuilder('college')
+      .select('college.id')
+      .leftJoin('college.district', 'district')
+      .leftJoin('college.state', 'state')
+      .leftJoin('college.country', 'country')
+      .leftJoin('college.collegeCourses', 'collegeCourses')
+      .leftJoin('collegeCourses.course', 'course');
+
+
+    // Extract and apply numeric filters from query
+    const numericTerms = options.keyword?.match(/\b\d+\b/g) || [];
+    if (numericTerms.length > 0) {
+      queryBuilder = queryBuilder.andWhere(
+        new Brackets(qb => {
+          numericTerms.forEach(num => {
+            const numericValue = parseInt(num);
+            qb.orWhere('college.rating >= :num', { num: numericValue })
+              .orWhere('college.zip = :num', { num })
+              .orWhere('college.established = :num', { num: numericValue });
+          });
+        })
+      );
+    }
+    
+    /*if (locationTerms.length > 0) {
+      const locationTerm = locationTerms[0];
+      orderedIdsQuery
+        .orderBy(`
+        CASE
+          WHEN LOWER(college.city) LIKE LOWER(:locationTerm) THEN 1
+          WHEN LOWER(college.address) LIKE LOWER(:locationTerm) THEN 2
+          WHEN LOWER(district.name) LIKE LOWER(:locationTerm) THEN 3
+          WHEN LOWER(state.name) LIKE LOWER(:locationTerm) THEN 4
+          WHEN LOWER(course.name) LIKE LOWER(:locationTerm) THEN 5
+          WHEN LOWER(country.name) LIKE LOWER(:locationTerm) THEN 6
+          ELSE 7
+        END`, 'ASC')
+        .setParameter('locationTerm', `%${locationTerm}%`);
+    }
+    else if (primarySearchTerm) {
+      orderedIdsQuery
+        .orderBy(`
+        CASE
+          WHEN LOWER(college.city) LIKE LOWER(:locationTerm) THEN 1
+          WHEN LOWER(college.address) LIKE LOWER(:locationTerm) THEN 2
+          WHEN LOWER(district.name) LIKE LOWER(:locationTerm) THEN 3
+          WHEN LOWER(state.name) LIKE LOWER(:locationTerm) THEN 4
+          WHEN LOWER(course.name) LIKE LOWER(:locationTerm) THEN 5
+          WHEN LOWER(country.name) LIKE LOWER(:locationTerm) THEN 6
+          ELSE 7
+        END`, 'ASC')
+        .setParameter('locationTerm', `%${primarySearchTerm}%`);
+    }*/
+
+    orderedIdsQuery = this.searchQueryService.addOrdering(orderedIdsQuery, parsedQuery);
+
+    const orderedIds = await orderedIdsQuery.getMany();
+
+    // Get full data for paginated results
+    const data = await this.collegeRepository
+      .createQueryBuilder('college')
+      .leftJoinAndSelect('college.state', 'state')
+      .leftJoinAndSelect('college.district', 'district')
+      .leftJoinAndSelect('college.country', 'country')
+      .leftJoinAndSelect('college.collegeCourses', 'collegeCourses')
+      .leftJoinAndSelect('collegeCourses.course', 'course')
+      .where('college.id IN (:...ids)', { ids: orderedIds.map(c => c.id) })
+      .addSelect('CASE college.id ' + 
+        orderedIds.map((c, index) => `WHEN '${c.id}' THEN ${index}`).join(' ') + 
+        ' ELSE 999999 END', 'custom_order')
+      .orderBy('custom_order', 'ASC')
+      .skip(skip)
+      .take(limit)
+      .getMany();
+
+    return {
+      data,
+      pagination: {
+        total,
+        page,
+        limit,
+        totalPages: Math.ceil(total / limit)
+      }
+    };
+  }
 
   async searchCollegesById(options: {
     query: string;
@@ -374,8 +669,18 @@ export class SearchService {
       phrase = phrase.replace(/"/g, '').trim();
       if (this.isLocationPhrase(phrase)) {
         result.locationTerms.push(phrase);
+        // Add singular form if plural
+        const singular = this.singularize(phrase);
+        if (singular !== phrase) {
+          result.locationTerms.push(singular);
+        }
       } else {
         result.searchTerms.push(phrase);
+        // Add singular form if plural
+        const singular = this.singularize(phrase);
+        if (singular !== phrase) {
+          result.searchTerms.push(singular);
+        }
       }
     });
 
@@ -384,16 +689,218 @@ export class SearchService {
     terms.forEach(term => {
       if (this.isLocationTerm(term)) {
         result.locationTerms.push(term);
+        // Add singular form if plural
+        const singular = this.singularize(term);
+        if (singular !== term) {
+          result.locationTerms.push(singular);
+        }
       } else if (term.includes(':')) {
         // Handle filters like "rating:4.5"
         const [key, value] = term.split(':');
         result.filters[key] = value;
       } else {
         result.searchTerms.push(term);
+        // Add singular form if plural
+        const singular = this.singularize(term);
+        if (singular !== term) {
+          result.searchTerms.push(singular);
+        }
       }
     });
 
     return result;
+  }
+
+  private parseSearchQueryv4(query: string): {
+    primarySearchTerm: string | null;
+    locationTerms: string[];
+    institutionSynonyms: string[];
+    filters: Record<string, string>;
+  } {
+    const result = {
+      primarySearchTerm: null as string | null,
+      locationTerms: [] as string[],
+      institutionSynonyms: [] as string[],
+      filters: {} as Record<string, string>
+    };
+
+    // Clean and normalize the query
+    query = this.formatQuery(query).toLowerCase();
+
+    // Extract and remove filters first (e.g., "rating:4.5")
+    const filterRegex = /(\w+):([^\s]+)/g;
+    let match;
+    while (match = filterRegex.exec(query)) {
+      result.filters[match[1]] = match[2];
+      query = query.replace(match[0], '');
+    }
+
+    // List of common educational institution terms (both singular and plural)
+    const institutionTerms = [
+      'college', 'colleges',
+      'school', 'schools',
+      'institute', 'institutes',
+      'institution', 'institutions',
+      'university', 'universities',
+      'academy', 'academies'
+    ];
+
+    // Check if query contains location indicators
+    const locationIndicators = ['in', 'near', 'at', 'around', 'within'];
+    const hasLocation = locationIndicators.some(indicator =>
+      query.includes(` ${indicator} `)
+    );
+
+    // If no explicit location, try to detect location terms
+    if (!hasLocation) {
+      const potentialLocations = query.split(/\s+/).filter(term =>
+        term.length > 0 && !institutionTerms.includes(term)
+      );
+
+      if (potentialLocations.length > 0) {
+        result.locationTerms = potentialLocations;
+        result.primarySearchTerm = null;
+        return result;
+      }
+    }
+
+    // Process location-based queries
+    if (hasLocation) {
+      const parts = query.split(/\s+/);
+      const locationIndex = parts.findIndex(part =>
+        locationIndicators.includes(part)
+      );
+
+      if (locationIndex !== -1) {
+        // Everything before location indicator becomes search terms
+        const searchParts = parts.slice(0, locationIndex);
+        result.institutionSynonyms = this.getInstitutionSynonyms(searchParts.join(' '));
+
+        // Everything after becomes location terms
+        result.locationTerms = parts.slice(locationIndex + 1);
+        return result;
+      }
+    }
+
+    // Default case for single word queries
+    if (query.split(/\s+/).length === 1) {
+      if (institutionTerms.includes(query)) {
+        result.institutionSynonyms = this.getInstitutionSynonyms(query);
+      } else {
+        result.primarySearchTerm = query;
+      }
+    }
+
+    return result;
+  }
+
+  private parseSearchQueryv5(query: string): {
+    primarySearchTerm: string | null;
+    locationTerms: string[];
+    institutionSynonyms: string[];
+    filters: Record<string, string>;
+  } {
+    const result = {
+      primarySearchTerm: null as string | null,
+      locationTerms: [] as string[],
+      institutionSynonyms: [] as string[],
+      filters: {} as Record<string, string>
+    };
+
+    // Clean and normalize the query
+    query = this.formatQuery(query).toLowerCase();
+
+    // 1. First extract and remove any explicit filters (e.g., "rating:4.5")
+    const filterRegex = /(\w+):([^\s]+)/g;
+    let match;
+    while ((match = filterRegex.exec(query))) {
+      result.filters[match[1]] = match[2];
+      query = query.replace(match[0], '');
+    }
+
+    // 2. Handle quoted phrases (exact matches)
+    const phrases = query.match(/"(.*?)"/g) || [];
+    query = query.replace(/"(.*?)"/g, '').trim();
+
+    phrases.forEach(phrase => {
+      phrase = phrase.replace(/"/g, '').trim();
+      if (this.isLocationPhrase(phrase)) {
+        result.locationTerms.push(phrase);
+      } else {
+        // For quoted phrases that aren't locations, add to both search terms and synonyms
+        result.primarySearchTerm = phrase;
+        result.institutionSynonyms.push(...this.getInstitutionSynonyms(phrase));
+      }
+    });
+
+    // 3. Process remaining terms
+    const terms = query.split(/\s+/).filter(term => term.length > 0);
+
+    // Special handling for course/program names (multi-word terms)
+    if (terms.length > 1 && !this.hasLocationIndicators(terms)) {
+      // If it's a multi-word query without location indicators, treat as course/program search
+      const combinedTerm = terms.join(' ');
+      result.primarySearchTerm = combinedTerm;
+      result.institutionSynonyms.push(...this.getInstitutionSynonyms(combinedTerm));
+    } else {
+      // Standard term processing
+      terms.forEach(term => {
+        if (this.isLocationTerm(term)) {
+          result.locationTerms.push(term);
+        } else if (term.includes(':')) {
+          // Handle any remaining filters that weren't caught earlier
+          const [key, value] = term.split(':');
+          result.filters[key] = value;
+        } else {
+          result.primarySearchTerm = result.primarySearchTerm 
+            ? `${result.primarySearchTerm} ${term}` 
+            : term;
+          result.institutionSynonyms.push(...this.getInstitutionSynonyms(term));
+        }
+      });
+    }
+
+    // 4. If we have location terms but no primary search term, 
+    // treat the first location term as a search term too
+    if (result.locationTerms.length > 0 && !result.primarySearchTerm) {
+      result.primarySearchTerm = result.locationTerms[0];
+    }
+
+    return result;
+  }
+
+  private getInstitutionSynonyms(term: string): string[] {
+    const synonymGroups = [
+      ['college', 'colleges'],
+      ['school', 'schools'],
+      ['institute', 'institutes'],
+      ['institution', 'institutions'],
+      ['university', 'universities'],
+      ['academy', 'academies']
+    ];
+
+    term = term.toLowerCase();
+    for (const group of synonymGroups) {
+      if (group.includes(term)) {
+        return group;
+      }
+    }
+    return [term];
+  }
+
+  // Basic singularization function - you may want to use a library for more accuracy
+  private singularize(word: string): string {
+    // Common plural to singular conversions
+    const pluralToSingular: Record<string, string> = {
+      colleges: 'college',
+      universities: 'university',
+      schools: 'school',
+      courses: 'course',
+      programs: 'program',
+      // Add more mappings as needed
+    };
+
+    return pluralToSingular[word.toLowerCase()] || word;
   }
 
   private parseSearchQueryV3(query: string): {
@@ -443,8 +950,13 @@ export class SearchService {
     return result;
   }
 
+  private hasLocationIndicators(terms: string[]): boolean {
+    const locationIndicators = ['in', 'near', 'at', 'around', 'within'];
+    return terms.some(term => locationIndicators.includes(term));
+  }
+
   private isLocationTerm(term: string): boolean {
-    const locationIndicators = ['near', 'in', 'at', 'around', 'within'];
+    const locationIndicators = ['near', 'in', 'at', 'around', 'within', 'close to' ];
     return locationIndicators.includes(term.toLowerCase());
   }
 

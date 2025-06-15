@@ -276,10 +276,11 @@ export class CollegeService {
 
 
   async getCollegesByCategorySections(
-    dto: GetCollegesByCategoryDto, limitPerCategory: number = 20
+    dto: GetCollegesByCategoryDto, limitPerCategory: number = 25
   ): Promise<CollegesByCategoryResponse> {
     // Get all category sections (filtered if IDs are provided)
-    const categorySections = await this.categorySectionRepository.find({
+    /*
+    const categorySections1 = await this.categorySectionRepository.find({
       where: dto.category_section_ids ? {
         id: In(dto.category_section_ids)
       } : undefined,
@@ -291,8 +292,32 @@ export class CollegeService {
                   'colleges.collegeCourses.course',
                   'colleges.performances'
                 ],
-       
+       take: limitPerCategory,
+    });*/
+
+    const categorySections = await this.categorySectionRepository.find({
+      where: dto.category_section_ids ? {
+        id: In(dto.category_section_ids)
+      } : undefined,
+      take: limitPerCategory,
     });
+
+    // Then for each category section, fetch limited colleges
+    for (const section of categorySections) {
+      section.colleges = await this.collegeRepository.find({
+        where: { categorySection: { id: section.id } },
+        relations: [
+          'state',
+          'district',
+          'country',
+          'collegeCourses',
+          'collegeCourses.course',
+          'performances'
+        ],
+        take: limitPerCategory,
+      });
+    }
+
 
     /*const results1 = await Promise.all(
       categorySections.map(async section => {

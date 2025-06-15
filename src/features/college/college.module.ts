@@ -21,9 +21,12 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { JwtStrategy } from 'src/common/middleware/jwt.strategy';
 import { User } from 'src/entities/user/user.entity';
 import { Role } from 'src/entities/user/roles.entity';
+import { SearchQueryService } from './search-query.services';
+import { CourseSearchService, LocationService } from './location-service';
+import { Course } from '../course/entities/course.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([College, Performance, State, District, Country, CollegeCourse, CategorySection, RecentCollege, User, Role]),
+  imports: [TypeOrmModule.forFeature([College, Performance, State, District, Country, CollegeCourse, CategorySection, RecentCollege, User, Role, Course]),
   PassportModule.register({
     defaultStrategy: 'jwt',
     session: false
@@ -38,7 +41,7 @@ import { Role } from 'src/entities/user/roles.entity';
   })
   ],
   controllers: [CollegeController, SearchController, RecentCollegeController],
-  providers: [CollegeService, SearchService, RecentCollegeService, JwtStrategy],
-  exports: [CollegeService, SearchService, RecentCollegeService],
+  providers: [CollegeService, SearchService, RecentCollegeService, JwtStrategy, SearchQueryService, LocationService, CourseSearchService],
+  exports: [CollegeService, SearchService, RecentCollegeService, SearchQueryService, LocationService, CourseSearchService],
 })
 export class CollegeModule { }

@@ -1,4 +1,4 @@
-import type { MigrationInterface, QueryRunner } from 'typeorm';
+import { MigrationInterface, QueryRunner, Table  } from 'typeorm';
 
 export class master1747224792846 implements MigrationInterface {
 
@@ -270,3 +270,4 @@ export class master1747224792846 implements MigrationInterface {
 
   }
 }
+export default master1747224792846;

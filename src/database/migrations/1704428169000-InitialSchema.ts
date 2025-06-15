@@ -1,5 +1,5 @@
 //docker-compose up --build
-import type { MigrationInterface, QueryRunner, Table  } from 'typeorm';
+import { MigrationInterface, QueryRunner, Table  } from 'typeorm';
 
 export class initSchema1704428169000 implements MigrationInterface {
 
@@ -133,3 +133,4 @@ export class initSchema1704428169000 implements MigrationInterface {
 
   }
 }
+export default initSchema1704428169000;

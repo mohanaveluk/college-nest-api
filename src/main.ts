@@ -5,8 +5,13 @@ import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import * as http from 'http';
 import { JwtAuthGuard } from './common/guards/jwt-auth.guard';
 import { JwtService } from '@nestjs/jwt';
+import { waitForDatabase } from './utils/database.util.js';
+import { getDatabaseConfig } from './config/database.config.js';
 
 async function bootstrap() {
+    // Wait for database to be available
+  await waitForDatabase(getDatabaseConfig());
+  
   const app = await NestFactory.create(AppModule);
 
   const server = app.getHttpServer() as http.Server;

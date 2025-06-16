@@ -18,8 +18,8 @@ export const getDatabaseConfig = (configService?: ConfigService): TypeOrmModuleO
     autoLoadEntities: true,
     entities: [join(__dirname, '..', '**', '*.entity.{ts,js}')],
     //entities: [__dirname + '/**/*.entity{.ts,.js}'],
-    migrations: [join(__dirname, '..', 'database', 'migrations', '*{.ts,.js}')],
-    migrationsRun: true,
+    //migrations: [join(__dirname, '..', 'database', 'migrations', '*{.ts,.js}')],
+    migrationsRun: false,
     retryAttempts: 5,
     retryDelay: 3000,
     ssl: process.env.NODE_ENV === 'production' ? {

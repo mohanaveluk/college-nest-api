@@ -436,7 +436,7 @@ export class UserService {
       });
       return roles;
     } catch (error) {
-      throw new InternalServerErrorException('Failed to fetch users');
+      throw new InternalServerErrorException('Failed to fetch roles');
     }
   }
 

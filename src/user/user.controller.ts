@@ -39,10 +39,12 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ResendOTCDto } from './dto/resend-otc.dto';
 import { UpdateUserDto } from './dto/update-user.dto';
 import { ToggleUserStatusDto } from './dto/toggle-user-status.dto';
+import { Public } from '../common/decorators/public.decorator';
 
   
   @ApiTags('users')
   @Controller('users')
+  @Public()
   export class UserController {
     constructor(private readonly userService: UserService) {}
   
@@ -263,20 +265,22 @@ import { ToggleUserStatusDto } from './dto/toggle-user-status.dto';
     
 
     @Get("roles")
+    @Roles(UserRole.Admin)
     @ApiOperation({ summary: 'Get all roles' })
     @ApiResponse({ 
       status: 200, 
       description: 'Returns all roles',
       type: [User]
     })
-    @ApiResponse({ 
-      status: 401, 
-      description: 'Unauthorized' 
-    })
+    // @ApiResponse({ 
+    //   status: 401, 
+    //   description: 'Unauthorized' 
+    // })
     @ApiResponse({ 
       status: 500, 
       description: 'Internal server error' 
     })
+    @Public()
     async getRoles() {
       return this.userService.findAllRoles();
     }

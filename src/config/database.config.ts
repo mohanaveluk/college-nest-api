@@ -38,7 +38,7 @@ export const getDatabaseConfig = (configService?: ConfigService): TypeOrmModuleO
 
   return {
     ...baseConfig,
-    synchronize: true,
+    synchronize: false,
     logging: true,
   };
 };
